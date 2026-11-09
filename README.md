@@ -8,7 +8,7 @@ Loyiha mikroservislarning o'zaro bog'liqligini (Coupling) yo'qotish, korporativ 
 
 ## 📌 Mundarija
 
-1. [Boshqa Repozitoriyga Qo'shish va Ulash](#-1-boshqa-repozitoriyga-qoshish-va-ulash)
+1. [Boshqa Repozitoriyga Qo'shish va Ulash (Git Subtree)](#-1-boshqa-repozitoriyga-qoshish-va-ulash-git-subtree)
 2. [Tezkor Boshlash (Program.cs)](#-2-tezkor-boshlash-programcs)
 3. [Barcha Imkoniyatlar (Fitchalar), Ulash va Plus / Minuslari](#-3-barcha-imkoniyatlar-fitchalar-ulash-va-plus--minuslari)
    - [1. Taqsimlangan Ruxsatlar va Sinxronizatsiya (Decentralized Permissions)](#1-taqsimlangan-ruxsatlar-va-sinxronizatsiya-decentralized-permissions)
@@ -24,54 +24,86 @@ Loyiha mikroservislarning o'zaro bog'liqligini (Coupling) yo'qotish, korporativ 
 
 ---
 
-## 📥 1. Boshqa Repozitoriyga Qo'shish va Ulash
+## 📥 1. Boshqa Repozitoriyga Qo'shish va Ulash (Git Subtree)
 
-`Core` repozitoriyasini har qanday mikroservisga **Git Submodule** sifatida qo'shish tavsiya etiladi.
+`Core` repozitoriyasini mikroservislarga ulash uchun **Git Subtree** usuli tanlangan.
 
-### 1-qadam. Repozitoriyga submodule sifatida olish
+### 💡 Nima uchun Git Submodule emas, Git Subtree?
+- **Yangi kelgan dasturchi uchun 100% shaffof:** Yangi dasturchi hech qanday maxsus buyruq yoki qoidalarni bilishi shart emas. U shunchaki odatdagidek `git clone` qiladi va servisni ishga tushirib ishlayveradi (`Core` oddiy ichki papka sifatida loyiha bilan birga keladi).
+- **Submodule boshog'rig'i yo'q:** `detached HEAD`, submoduleni push qilishni unutish, `git pull` da submodule papkasi bo'sh qolib ketishi kabi muammolar mutlaqo bo'lmaydi.
+- **Mustaqil CI/CD:** Serverda yoki Docker da build bo'lganda ham qo'shimcha submodule kalitlari yoki sozlamalar talab qilinmaydi.
 
-Mikroservis repozitoriyasi ildizida (root) quyidagi buyruqni bajaring:
+---
 
-```bash
-# Standart tavsiya etilgan yo'l: external/Core papkasiga olish
-git submodule add <Core-git-repo-url> external/Core
+### 1-qadam. Mikroservisga Core ni birinchi marta qo'shish (Setup)
 
-# Submodule fayllarini yuklab olish:
-git submodule update --init --recursive
-```
-
-> **Agar loyihani boshqa kompyuterda klon qilsangiz:**
-> ```bash
-> git clone --recurse-submodules <Mikroservis-repo-url>
-> ```
-
-### 2-qadam. Yangi o'zgarishlarni tortib olish (Update)
-
-Agar `Core` kutubxonasiga yangi imkoniyatlar qo'shilsa, mikroservisda uni yangilash:
+Mikroservis repozitoriyasi ildizida (root papkada) bitta buyruq bilan `Core` ni qo'shib olasiz:
 
 ```bash
-git submodule update --remote --merge
+# Core ni `src/Core` papkasiga bitta commit bilan qo'shish:
+git subtree add --prefix src/Core <Core-git-repo-url> main --squash
+```
+> `--squash` kaliti `Core` ning yuzlab eski commitlarini bitta toza commit qilib qo'shadi, natijada mikroservis git tarixi toza bo'lib qoladi.
+
+Qulaylik uchun mikroservisda `Core` ga remote alias qo'shib qo'yish mumkin:
+```bash
+git remote add core-origin <Core-git-repo-url>
 ```
 
-### 3-qadam. Mikroservis loyihalariga (.csproj) Reference berish
+---
 
-Mikroservisingiz qatlamlariga qarab quyidagi loyihalarni bog'laysiz:
+### 2-qadam. Yangi kelgan dasturchi uchun ish boshlash (Developer Onboarding)
+
+Yangi dasturchi shunchaki mikroservisni klon qiladi va ishlayveradi:
+```bash
+git clone <Mikroservis-repo-url>
+cd <Mikroservis-papka>
+dotnet run
+```
+Dasturchi uchun `Core` oddiy ichki papka bo'lib ko'rinadi. U `git pull`, `git push` qilganda faqat o'z servisining repozitoriyasi bilan ishlaydi.
+
+---
+
+### 3-qadam. Core'dagi yangilanishlarni tortib olish (Pull Updates)
+
+Agar `Core` kutubxonasiga yangi funksiyalar yoki o'zgarishlar kiritilsa, uni mikroservisga tortib olish:
+
+```bash
+git subtree pull --prefix src/Core core-origin main --squash
+# yoki to'g'ridan-to'g'ri URL orqali:
+git subtree pull --prefix src/Core <Core-git-repo-url> main --squash
+```
+
+---
+
+### 4-qadam. Mikroservis loyihalariga (.csproj) Reference berish
+
+Mikroservisning qatlamlariga qarab quyidagicha Project Reference beriladi:
 
 ```xml
-<!-- Mikroservis Domain yoki Application qatlamiga: -->
+<!-- Mikroservis Domain qatlamiga: -->
 <ItemGroup>
-  <ProjectReference Include="..\..\external\Core\src\Core.Domain\Core.Domain.csproj" />
+  <ProjectReference Include="..\Core\src\Core.Domain\Core.Domain.csproj" />
 </ItemGroup>
 
 <!-- Mikroservis Infrastructure qatlamiga: -->
 <ItemGroup>
-  <ProjectReference Include="..\..\external\Core\src\Core.Infrastructure\Core.Infrastructure.csproj" />
+  <ProjectReference Include="..\Core\src\Core.Infrastructure\Core.Infrastructure.csproj" />
 </ItemGroup>
 
 <!-- Mikroservis Web / Api qatlamiga: -->
 <ItemGroup>
-  <ProjectReference Include="..\..\external\Core\src\Core.Web\Core.Web.csproj" />
+  <ProjectReference Include="..\Core\src\Core.Web\Core.Web.csproj" />
 </ItemGroup>
+```
+
+---
+
+### 5-qadam (Ixtiyoriy). Mikroservis ichidan Core'ga tuzatish yuborish (Push Back)
+
+Agar mikroservisda ishlab turib `Core` ichidagi biror xatolikni to'g'rilasangiz va uni markaziy `Core` repozitoriyasiga ham qaytarib yubormoqchi bo'lsangiz:
+```bash
+git subtree push --prefix src/Core core-origin main
 ```
 
 ---
