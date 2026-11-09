@@ -1,3 +1,4 @@
+using System.Reflection;
 using Core.Domain.Permissions;
 using Core.Infrastructure.Permissions.Grpc;
 using MassTransit;
@@ -7,8 +8,8 @@ using Microsoft.Extensions.Logging;
 namespace Core.Infrastructure.Permissions.Services;
 
 /// <summary>
-/// Mikroservis ruxsatlarini (Permissions) yig'ib, ularni RabbitMQ yoki gRPC
-/// orqali AuthApi ga yuboruvchi asosiy implementatsiya.
+/// Mikroservis ruxsatlarini (Permissions) yig'ib, ularni RabbitMQ, gRPC
+/// yoki to'g'ridan-to'g'ri (Direct) AuthApi DB ga saqlovchi implementatsiya.
 /// </summary>
 public class PermissionSyncSender : IPermissionSyncSender
 {
@@ -88,6 +89,38 @@ public class PermissionSyncSender : IPermissionSyncSender
         }
     }
 
+    /// <inheritdoc />
+    public async Task SyncDirectAsync(CancellationToken cancellationToken = default)
+    {
+        using var scope = _serviceProvider.CreateScope();
+        var storageHandler = scope.ServiceProvider.GetService<IPermissionStorageHandler>();
+        if (storageHandler == null)
+        {
+            _logger.LogWarning("IPermissionStorageHandler topilmadi. Lokal ruxsatlarni to'g'ridan-to'g'ri saqlab bo'lmadi.");
+            return;
+        }
+
+        var events = BuildEvents();
+        foreach (var ev in events)
+        {
+            _logger.LogInformation(
+                "Lokal ruxsatlar to'g'ridan-to'g'ri bazaga saqlanmoqda: Servis: {ServiceName}, Soni: {Count}",
+                ev.ServiceName,
+                ev.Permissions.Count);
+
+            var processed = await storageHandler.HandlePermissionsReceivedAsync(
+                ev.ServiceName,
+                ev.ServiceCode,
+                ev.Permissions,
+                cancellationToken);
+
+            _logger.LogInformation(
+                "{ServiceName} lokal servisi uchun {Processed} ta ruxsat to'g'ridan-to'g'ri saqlandi/yangilandi.",
+                ev.ServiceName,
+                processed);
+        }
+    }
+
     private List<SyncPermissionsIntegrationEvent> BuildEvents()
     {
         var result = new List<SyncPermissionsIntegrationEvent>();
@@ -99,12 +132,14 @@ public class PermissionSyncSender : IPermissionSyncSender
                 continue;
 
             var first = permissions[0];
-            var serviceName = first.ServiceName ?? enumType.Name;
+            var moduleAttr = enumType.GetCustomAttribute<PermissionsModuleAttribute>();
+            var serviceName = moduleAttr?.ServiceName ?? first.ServiceName ?? enumType.Name;
+            var serviceCode = moduleAttr?.ServiceCode ?? (permissions.Count > 0 ? permissions[0].Code / 1000000 : null);
 
             result.Add(new SyncPermissionsIntegrationEvent
             {
                 ServiceName = serviceName,
-                ServiceCode = permissions.FirstOrDefault()?.Code / 1000000,
+                ServiceCode = serviceCode,
                 Permissions = permissions
             });
         }

@@ -7,6 +7,8 @@ using Core.Domain.Helpers;
 using Core.Domain.Models.Api;
 using Core.Infrastructure.Resilience;
 using Core.Web.Constants;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Core.Tests;
@@ -245,14 +247,57 @@ public class FixesAndFeaturesTests
         var customCodes = Assert.IsType<int[]>(customAttr.Arguments[0]);
         Assert.Equal([88100001, 88100002], customCodes);
 
-        // 2. With legacy UserPermissions enum
-        var legacyAttr = new Core.Web.Attributes.PermissionAuthorizeAttribute(UserPermissions.LogOut);
-        var legacyCodes = Assert.IsType<int[]>(legacyAttr.Arguments![0]);
-        Assert.Equal([10100001], legacyCodes);
+        // 2. With single enum value
+        var singleAttr = new Core.Web.Attributes.PermissionAuthorizeAttribute(SampleCustomPermissions.CreateSample);
+        var singleCodes = Assert.IsType<int[]>(singleAttr.Arguments![0]);
+        Assert.Equal([88100001], singleCodes);
 
         // 3. With raw integers
         var rawAttr = new Core.Web.Attributes.PermissionAuthorizeAttribute(88100001);
         var rawCodes = Assert.IsType<int[]>(rawAttr.Arguments![0]);
         Assert.Equal([88100001], rawCodes);
+    }
+
+    private class TestPermissionStorageHandler : Core.Infrastructure.Permissions.IPermissionStorageHandler
+    {
+        public List<Core.Domain.Permissions.PermissionDefinition> SavedPermissions { get; } = [];
+        public string? LastServiceName { get; private set; }
+
+        public Task<int> HandlePermissionsReceivedAsync(
+            string serviceName,
+            int? serviceCode,
+            IReadOnlyList<Core.Domain.Permissions.PermissionDefinition> permissions,
+            CancellationToken cancellationToken = default)
+        {
+            LastServiceName = serviceName;
+            SavedPermissions.AddRange(permissions);
+            return Task.FromResult(permissions.Count);
+        }
+    }
+
+    [Fact]
+    public async Task PermissionSyncSender_SyncDirectAsync_SavesLocalEnumDirectly()
+    {
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        var storage = new TestPermissionStorageHandler();
+        services.AddSingleton<Core.Infrastructure.Permissions.IPermissionStorageHandler>(storage);
+        services.AddLogging();
+        var sp = services.BuildServiceProvider();
+
+        var logger = sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Core.Infrastructure.Permissions.Services.PermissionSyncSender>>();
+        var sender = new Core.Infrastructure.Permissions.Services.PermissionSyncSender([typeof(SampleCustomPermissions)], sp, logger);
+
+        await sender.SyncDirectAsync();
+
+        Assert.Equal("SampleService", storage.LastServiceName);
+        Assert.Equal(2, storage.SavedPermissions.Count);
+        Assert.Contains(storage.SavedPermissions, p => p.Code == 88100001 && p.Name == "CreateSample");
+        Assert.Contains(storage.SavedPermissions, p => p.Code == 88100002 && p.Name == "DeleteSample");
+    }
+
+    [Fact]
+    public void PermissionAuthorizeAttribute_ThrowsArgumentException_WhenInvalidTypePassed()
+    {
+        Assert.Throws<ArgumentException>(() => new Core.Web.Attributes.PermissionAuthorizeAttribute(new object()));
     }
 }

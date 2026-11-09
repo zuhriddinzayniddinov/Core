@@ -1,4 +1,3 @@
-using Core.Domain.Enums;
 using Core.Web.Filters;
 using Microsoft.AspNetCore.Mvc;
 
@@ -6,10 +5,9 @@ namespace Core.Web.Attributes;
 
 /// <summary>
 /// Endpoint yoki Kontrollerga kirish huquqini (RBAC Permission) tekshiruvchi atribut.
-/// Quyidagi barcha turlarni qabul qila oladi:
-/// 1. Markaziy <see cref="UserPermissions"/> enumi (orqaga to'liq moslik uchun).
-/// 2. Har bir mikroservisning o'ziga tegishli ixtiyoriy lokal enumi (masalan: <c>QuranPermissions.CreateTrainingCenter</c>).
-/// 3. Raqamli ruxsat kodlari (masalan: <c>60100001</c>).
+/// Har qanday mikroservisning o'z lokal enumi yoki raqamli (int) kodlarini qabul qiladi:
+/// 1. Har bir mikroservisning o'ziga tegishli ixtiyoriy lokal enumi (masalan: <c>QuranPermissions.CreateTrainingCenter</c>).
+/// 2. Raqamli ruxsat kodlari (masalan: <c>60100001</c>).
 /// </summary>
 /// <example>
 /// <code>
@@ -24,16 +22,6 @@ namespace Core.Web.Attributes;
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true)]
 public class PermissionAuthorizeAttribute : TypeFilterAttribute
 {
-    /// <summary>
-    /// Standart markaziy UserPermissions enum qiymatlari uchun konstruktor.
-    /// </summary>
-    /// <param name="permissions">Talab qilinadigan ruxsatlar.</param>
-    public PermissionAuthorizeAttribute(params UserPermissions[] permissions)
-        : base(typeof(PermissionRequirementFilter))
-    {
-        Arguments = [ permissions.Cast<int>().ToArray() ];
-    }
-
     /// <summary>
     /// Raqamli ruxsat kodlari uchun konstruktor.
     /// </summary>
@@ -63,6 +51,9 @@ public class PermissionAuthorizeAttribute : TypeFilterAttribute
         var list = new List<int>(permissions.Length);
         foreach (var p in permissions)
         {
+            if (p is null)
+                continue;
+
             if (p is Enum e)
             {
                 list.Add(Convert.ToInt32(e));
@@ -73,7 +64,18 @@ public class PermissionAuthorizeAttribute : TypeFilterAttribute
             }
             else if (p is IConvertible c)
             {
-                list.Add(c.ToInt32(null));
+                try
+                {
+                    list.Add(c.ToInt32(null));
+                }
+                catch (Exception ex)
+                {
+                    throw new ArgumentException($"Ruxsat qiymati '{p}' butun son (int) yoki Enum bo'lishi kerak.", nameof(permissions), ex);
+                }
+            }
+            else
+            {
+                throw new ArgumentException($"Ruxsat qiymati '{p}' (turi: {p.GetType().Name}) butun son (int) yoki Enum bo'lishi kerak.", nameof(permissions));
             }
         }
         return list.ToArray();

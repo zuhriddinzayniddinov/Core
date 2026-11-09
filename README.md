@@ -1,81 +1,194 @@
 # Core — Shared Base Microservices Library (.NET 10)
 
-Ushbu repozitoriy barcha alohida mikroservislar uchun **umumiy asos (Shared Base Library)** bo'lib, har bir servis repozitoriyasiga **Git Submodule** sifatida bog'lanadi.
+`Core` — barcha mikroservislar uchun **100% mustaqil, servis-neytral (hech qanday servisga yoki ma'lumotlar bazasi jadvallariga qaram bo'lmagan)** umumiy infratuzilma kutubxonasi.
 
-Loyiha har bir servis alohida ma'lumotlar bazasiga (Database-per-Service) va alohida repozitoriyga ega bo'lgan taqsimlangan korporativ arxitektura uchun chuqur optimallashtirilgan.
+Loyiha mikroservislarning o'zaro bog'liqligini (Coupling) yo'qotish, korporativ xavfsizlik, tranzaksiyalar ishonchliligi va yuqori tezlikni ta'minlash uchun mo'ljallangan.
 
 ---
 
-## 📁 Loyiha Strukturasi
+## 📌 Mundarija
 
-Loyiha Clean / Layered Architecture tamoyillari asosida 3 ta asosiy modulga ajratilgan:
+1. [Boshqa Repozitoriyga Qo'shish va Ulash](#-1-boshqa-repozitoriyga-qoshish-va-ulash)
+2. [Tezkor Boshlash (Program.cs)](#-2-tezkor-boshlash-programcs)
+3. [Barcha Imkoniyatlar (Fitchalar), Ulash va Plus / Minuslari](#-3-barcha-imkoniyatlar-fitchalar-ulash-va-plus--minuslari)
+   - [1. Taqsimlangan Ruxsatlar va Sinxronizatsiya (Decentralized Permissions)](#1-taqsimlangan-ruxsatlar-va-sinxronizatsiya-decentralized-permissions)
+   - [2. Taqsimlangan Qulflash (Redis Distributed Lock + Watchdog)](#2-taqsimlangan-qulflash-redis-distributed-lock--watchdog)
+   - [3. .NET 10 HybridCache (L1 In-Memory + L2 Redis)](#3-net-10-hybridcache-l1-in-memory--l2-redis)
+   - [4. Fintech Idempotensiya Middleware (X-Idempotency-Key)](#4-fintech-idempotensiya-middleware-x-idempotency-key)
+   - [5. Sessiya va Tokenni Bekor Qilish (Session Revocation Middleware)](#5-sessiya-va-tokenni-bekor-qilish-session-revocation-middleware)
+   - [6. PostgreSQL & EF Core 10 Asoslari (CoreDbContext)](#6-postgresql--ef-core-10-asoslari-coredbcontext)
+   - [7. Ko'p Ijarachilik (Multi-Tenancy Izolyatsiyasi)](#7-kop-ijarachilik-multi-tenancy-izolyatsiyasi)
+   - [8. MassTransit + Transactional Outbox (RabbitMQ)](#8-masstransit--transactional-outbox-rabbitmq)
+   - [9. Code-First gRPC (protobuf-net.Grpc)](#9-code-first-grpc-protobuf-netgrpc)
+   - [10. Xavfsizlik Sarlavhalari, Rate Limiting va Siqish](#10-xavfsizlik-sarlavhalari-rate-limiting-va-siqish)
 
-```text
-src/
-├── Core.Domain/              # Asosiy biznes turlari, shartnomalar, modellar va interfeyslar
-│   ├── Common/               # ModelBase, AuditableModelBase, MultiLanguageField
-│   │   ├── Context/          # ITenantContext, ITenantEntity, NullTenantContext (Multi-Tenancy)
-│   │   └── Lock/             # IDistributedLock (Taqsimlangan qulflash abstraksiyasi)
-│   ├── Configurations/       # JwtOption, CronRegistryEntry
-│   ├── Constants/            # AppHeaderNames, AppCacheKeys
-│   ├── DTOs/                 # BaseDto
-│   ├── Enums/                # UserPermissions, ErrorTypes, CustomClaimNames, SignMethods, TokenTypes
-│   ├── Events/               # IEventBus, IntegrationEvent, IIntegrationEventHandler
-│   ├── Exceptions/           # ApiExceptionBase, NotFoundException, ValidationException, etc.
-│   ├── Helpers/              # EncryptionHelper, PasswordHelper, SerializerHelper, HttpClientHelpers
-│   └── Models/               # Api modellari (ResponseModel, MetaQueryModel, MetaQueryFilterModel)
-│
-├── Core.Infrastructure/      # Tashqi xizmatlar, ma'lumotlar bazasi, kesh va xabar almashinuvi
-│   ├── Caching/              # ICacheService, MemoryCacheService, RedisCacheService
-│   │   └── Hybrid/           # IHybridCacheService, HybridCacheService (.NET 10 HybridCache)
-│   ├── Data/
-│   │   ├── Context/          # CoreDbContext (xmin Concurrency, Multi-Tenant Query Filter, Outbox)
-│   │   ├── Extensions/       # QueryableExtensions (Parametrlashtirilgan Dynamic LINQ, ToReadOnlyListAsync)
-│   │   └── Repositories/     # GenericRepository, RepositoryBase, IRepositoryBase
-│   ├── Grpc/                 # Code-First gRPC (protobuf-net.Grpc)
-│   │   ├── Extensions/       # AddCoreGrpcServer, AddCoreGrpcClient
-│   │   └── Interceptors/     # GrpcClientContextInterceptor, GrpcServerContextInterceptor, GrpcExceptionInterceptor
-│   ├── Lock/                 # RedisDistributedLock (PeriodicTimer Watchdog va Random Jitter)
-│   ├── Messaging/            # MassTransit + RabbitMQ + PostgreSQL Transactional Outbox
-│   │   ├── Consumers/        # BaseFaultConsumer (Poison message audit)
-│   │   ├── Extensions/       # AddCoreMassTransit (Outbox, Exponential Retry, Kebab-case)
-│   │   └── Filters/          # MassTransitTenantFilters (Multi-Tenancy avto-uzatish)
-│   ├── Resilience/           # ResiliencePipelineExtensions, ResilienceDelegatingHandler
-│   └── Security/             # IJwtTokenHandler, JwtTokenHandler
-│
-└── Core.Web/                 # HTTP veb qatlami, middleware'lar va DI konfiguratsiyalari
-    ├── Attributes/           # ApiGroupAttribute, BasicAuthorizeAttribute, PermissionAuthorizeAttribute
-    ├── Constants/            # Params, StaticCache
-    ├── Controllers/          # ApiControllerBase, CrudGenericController
-    ├── CronSchedulers/       # ICronJob, CronScheduler
-    ├── Extensions/
-    │   ├── ConfigureApplication.cs   # builder.ConfigureDefault va app.ConfigureDefault
-    │   ├── WebCoreExtensions.cs      # Alohida xizmatlarni ulash (AddCoreHybridCache, AddCoreDistributedLock...)
-    │   ├── RateLimitingExtensions.cs # Partitioned IP Rate Limiter
-    │   └── CompressionExtensions.cs  # Brotli + Gzip Response Compression
-    ├── Filters/              # ModelValidationFilter, PermissionRequirementFilter, ExceptionFilter
-    ├── Middlewares/
-    │   ├── CorrelationIdMiddleware.cs        # X-Correlation-Id propagatsiyasi
-    │   ├── GlobalExceptionHandlerMiddleware.cs # Markaziy xatoliklarni ushlash
-    │   ├── IdempotencyMiddleware.cs           # Fintech SHA-256 dublikat so'rovlarni bloklash
-    │   ├── SessionValidationMiddleware.cs     # L1 + L2 sessiyani bekor qilish (Revocation)
-    │   ├── SecurityHeadersMiddleware.cs       # HSTS, Anti-Clickjacking, Anti-XSS
-    │   └── RequestResponseLoggingMiddleware.cs
-    └── Services/             # IBasicCrudService, BasicCrudService, GenericCrudService
+---
+
+## 📥 1. Boshqa Repozitoriyga Qo'shish va Ulash
+
+`Core` repozitoriyasini har qanday mikroservisga **Git Submodule** sifatida qo'shish tavsiya etiladi.
+
+### 1-qadam. Repozitoriyga submodule sifatida olish
+
+Mikroservis repozitoriyasi ildizida (root) quyidagi buyruqni bajaring:
+
+```bash
+# Standart tavsiya etilgan yo'l: external/Core papkasiga olish
+git submodule add <Core-git-repo-url> external/Core
+
+# Submodule fayllarini yuklab olish:
+git submodule update --init --recursive
+```
+
+> **Agar loyihani boshqa kompyuterda klon qilsangiz:**
+> ```bash
+> git clone --recurse-submodules <Mikroservis-repo-url>
+> ```
+
+### 2-qadam. Yangi o'zgarishlarni tortib olish (Update)
+
+Agar `Core` kutubxonasiga yangi imkoniyatlar qo'shilsa, mikroservisda uni yangilash:
+
+```bash
+git submodule update --remote --merge
+```
+
+### 3-qadam. Mikroservis loyihalariga (.csproj) Reference berish
+
+Mikroservisingiz qatlamlariga qarab quyidagi loyihalarni bog'laysiz:
+
+```xml
+<!-- Mikroservis Domain yoki Application qatlamiga: -->
+<ItemGroup>
+  <ProjectReference Include="..\..\external\Core\src\Core.Domain\Core.Domain.csproj" />
+</ItemGroup>
+
+<!-- Mikroservis Infrastructure qatlamiga: -->
+<ItemGroup>
+  <ProjectReference Include="..\..\external\Core\src\Core.Infrastructure\Core.Infrastructure.csproj" />
+</ItemGroup>
+
+<!-- Mikroservis Web / Api qatlamiga: -->
+<ItemGroup>
+  <ProjectReference Include="..\..\external\Core\src\Core.Web\Core.Web.csproj" />
+</ItemGroup>
 ```
 
 ---
 
-## 🚀 Yangi Qo'shilgan Imkoniyatlar va Ulardan Foydalanish
+## ⚡ 2. Tezkor Boshlash (`Program.cs`)
 
-### 1. 🔒 Taqsimlangan Qulflash (Redis Distributed Lock + Watchdog)
-Parallel serverlarda yoki mikroservis nusxalarida bitta resursni (masalan: to'lov yoki buyurtma) bir vaqtda o'zgartirib qo'yishning oldini oladi. Uzoq davom etadigan operatsiyalarda fonda `PeriodicTimer` orqali qulf muddatini avtomatik uzaytirib turadi (Watchdog).
+Barcha standart xizmatlar va middleware'larni bitta qator bilan ishga tushirish mumkin:
 
 ```csharp
-// DI ro'yxatdan o'tkazish:
+var builder = WebApplication.CreateBuilder(args);
+
+// Barcha standartlarni (DbContext, Logging, HybridCache, DistributedLock, RateLimiter, MassTransit) yoqish:
+builder.ConfigureDefault<MyDbContext>();
+
+var app = builder.Build();
+
+// Pipeline (SecurityHeaders, GlobalException, CorrelationId, Idempotency, SessionValidation):
+await app.ConfigureDefault<MyDbContext>();
+
+app.MapControllers();
+app.Run();
+```
+
+---
+
+## 🛠️ 3. Barcha Imkoniyatlar (Fitchalar), Ulash va Plus / Minuslari
+
+---
+
+### 1. Taqsimlangan Ruxsatlar va Sinxronizatsiya (Decentralized Permissions)
+
+`Core` kutubxonasida hech qanday servisga xos monolit enum yoki ma'lumotlar bazasi jadvallari yo'q. Har bir servis o'zining ruxsatlariga o'zi egalik qiladi.
+
+#### A) Oddiy Mikroservisda (masalan: `QuranCourse`, `OrderService`):
+
+1. **O'zining ichida ruxsatlar Enum'ini yaratadi:**
+```csharp
+using System.ComponentModel;
+using Core.Domain.Permissions;
+
+[PermissionsModule("QuranCourse", serviceCode: 60, moduleName: "Courses")]
+public enum QuranPermissions
+{
+    [Description("Yangi kurs yaratish")]
+    CreateCourse = 60100001,
+
+    [Description("Kurslarni ko'rish")]
+    ViewCourses  = 60100002
+}
+```
+
+2. **Kontrollerda ruxsatni tekshirish:**
+```csharp
+[HttpPost]
+[PermissionAuthorize(QuranPermissions.CreateCourse)]
+public async Task<IActionResult> CreateCourse(...) { ... }
+```
+
+3. **`Program.cs` da avtomatik yuborishni yoqish:**
+```csharp
+// Servis start bo'lishi bilan ruxsatlar ro'yxati RabbitMQ orqali markaziy servisga yuboriladi:
+builder.Services.AddCorePermissionAutoSync<QuranPermissions>();
+```
+
+#### B) Ruxsatlarni qabul qiluvchi / saqlovchi xizmatda (masalan: `AuthApi` yoki `PermissionService`):
+
+`Core` ma'lumotlar bazasi bilan to'g'ridan-to'g'ri ishlamaydi. Qabul qiluvchi servis o'z bazasiga o'zi saqlashi uchun `IPermissionStorageHandler` interfeysini implement qiladi:
+
+1. **Storage Handlerni yozish:**
+```csharp
+public class MyPermissionStorageHandler(MyDbContext db) : IPermissionStorageHandler
+{
+    public async Task<int> HandlePermissionsReceivedAsync(
+        string serviceName, 
+        int? serviceCode, 
+        IReadOnlyList<PermissionDefinition> permissions, 
+        CancellationToken ct)
+    {
+        // Servis o'zining ma'lumotlar bazasi jadvaliga permissions ro'yxatini (Code, Name, Description...)
+        // xohlagan usulda (Upsert, EF Core, Dapper) saqlaydi yoki yangilaydi.
+        return permissions.Count;
+    }
+}
+```
+
+2. **`Program.cs` da ro'yxatdan o'tkazish:**
+```csharp
+// 1. Qabul qiluvchini ulash (agar o'zining lokal enumi bo'lsa, startda uni ham to'g'ridan-to'g'ri saqlaydi):
+builder.Services.AddCorePermissionReceiver<MyPermissionStorageHandler, AuthPermissions>();
+
+// 2. MassTransit busiga consumerni qo'shish:
+builder.Services.AddCoreMassTransit<MyDbContext>(builder.Configuration, bus =>
+{
+    bus.AddPermissionSyncConsumer(); // Boshqa servislardan kelgan ruxsatlarni ushlaydi
+});
+```
+
+#### ⚖️ Plus va Minuslari:
+- **✅ Plus:**
+  - `Core` mutlaqo toza va database-agnostic.
+  - Servislar o'rtasida qaramlik (tight coupling) yo'q. Yangi endpoint qo'shilsa `Core` ni yangilash shart emas.
+  - Ruxsatlar nomlari va tavsiflari inson tushunadigan tilda markaziy bazada doim yangilanib turadi.
+- **⚠️ Minus:**
+  - Servis kodi prefikslari (masalan: `60`, `40`, `10`) to'qnashib ketmasligi uchun jamoada raqamlash tartibiga kelishib olinishi kerak.
+
+---
+
+### 2. Taqsimlangan Qulflash (Redis Distributed Lock + Watchdog)
+
+Parallel serverlarda yoki mikroservis nusxalarida bitta resursni (masalan: to'lov yoki buyurtma) bir vaqtda o'zgartirib qo'yishning (Race condition) oldini oladi.
+
+#### Qayerda chaqiriladi va qanday ishlatiladi?
+```csharp
+// 1. Program.cs da ulash:
 builder.Services.AddCoreDistributedLock(builder.Configuration.GetConnectionString("Redis"));
 
-// Xizmat ichida ishlatish:
+// 2. Servis ichida ishlatish:
 public class PaymentService(IDistributedLock distributedLock)
 {
     public async Task ProcessPaymentAsync(long orderId, CancellationToken ct)
@@ -87,125 +200,182 @@ public class PaymentService(IDistributedLock distributedLock)
             ct);
 
         if (lockHandle is null)
-        {
-            throw new ConflictException("Ushbu buyurtma to'lovi ayni paytda boshqa oqimda amalga oshirilmoqda!");
-        }
+            throw new ConflictException("Ushbu buyurtma ayni vaqtda boshqa jarayonda bajarilmoqda!");
 
-        // Qulf olindi! Tranzaksiya xavfsiz bajariladi.
-        // Blok tugashi bilan qulf avtomatik bo'shatiladi.
+        // Qulf olindi! Uzoq operatsiya davomida Watchdog fonida qulf muddatini avtomatik uzaytiradi.
+        // Blok tugashi bilan (using) qulf xavfsiz bo'shatiladi.
     }
 }
 ```
 
+#### ⚖️ Plus va Minuslari:
+- **✅ Plus:** Parallel dublikat to'lov yoki operatsiyalarni 100% yo'qotadi. Fonda `PeriodicTimer` orqali Watchdog bor (qulf operatsiya tugamasdan eskirib qolmaydi).
+- **⚠️ Minus:** Redis serveri ishlab turishi shart. Tarmoq sekinlashsa timeout xatosi qaytarishi mumkin.
+
 ---
 
-### 2. ⚡ .NET 10 `HybridCache` (L1 In-Memory + L2 Redis)
-L1 xotira (nanosoniyalarda) va L2 Redis keshini yagona xizmatda birlashtiradi. **Lock-on-Read (Single-Flight)** orqali Cache Stampede (bir vaqtda yuzlab so'rovlar bazaga borishi) muammosini yo'qotadi. Bog'liq ma'lumotlarni teglar (`RemoveByTagAsync`) orqali bir zumda guruhlab tozalash mumkin.
+### 3. .NET 10 `HybridCache` (L1 In-Memory + L2 Redis)
 
+L1 xotira (nanosoniyalarda) va L2 Redis keshini yagona xizmatda birlashtiradi. **Lock-on-Read (Single-Flight)** orqali Cache Stampede muammosini bartaraf etadi.
+
+#### Qayerda chaqiriladi va qanday ishlatiladi?
 ```csharp
-// DI ro'yxatdan o'tkazish:
+// 1. Program.cs da ulash:
 builder.Services.AddCoreHybridCache(builder.Configuration.GetConnectionString("Redis"));
 
-// Xizmat ichida ishlatish:
-public class ProductService(IHybridCacheService cache)
+// 2. Servis ichida ishlatish:
+public class ProductService(IHybridCacheService cache, MyDbContext db)
 {
     public async Task<ProductDto> GetByIdAsync(long id, CancellationToken ct)
     {
         return await cache.GetOrCreateAsync(
             key: $"product:{id}",
-            factory: async token => await dbContext.Products.FindAsync([id], token),
-            localTtl: TimeSpan.FromSeconds(30),  // L1 In-Memory
-            remoteTtl: TimeSpan.FromMinutes(10), // L2 Redis
+            factory: async token => await db.Products.FindAsync([id], token),
+            localTtl: TimeSpan.FromSeconds(30),  // L1 In-Memory (juda tez)
+            remoteTtl: TimeSpan.FromMinutes(10), // L2 Redis (taqsimlangan)
             tags: ["products"],
             cancellationToken: ct);
     }
 
     public async Task UpdateAsync(ProductDto dto, CancellationToken ct)
     {
-        await dbContext.SaveChangesAsync(ct);
-        // Barcha mahsulotlar keshini teg bo'yicha tozalash:
+        await db.SaveChangesAsync(ct);
+        // Barcha mahsulotlar keshini teg bo'yicha bir zumda tozalash:
         await cache.RemoveByTagAsync("products", ct);
     }
 }
 ```
 
+#### ⚖️ Plus va Minuslari:
+- **✅ Plus:** Cache Stampede bo'lmaydi (bir vaqtda 10,000 so'rov kelsa ham bazaga faqat 1 tasi boradi). L1 xotira tufayli javob berish tezligi 10-100 baravar oshadi.
+- **⚠️ Minus:** L1 xotirasi server RAM'idan foydalanadi (juda katta gigabaytlik obyektlarni keshlamaslik lozim).
+
 ---
 
-### 3. 🛡️ Fintech HTTP Idempotensiya Middleware (`X-Idempotency-Key`)
-POST va PUT so'rovlarida mijoz tugmani qayta bossa yoki tarmoq qayta yuborsa, dublikat amallarning oldini oladi. So'rov tanasining `SHA-256` xeshini tekshirib, bitta kalitdan boshqa parametrlar bilan foydalanishga yo'l qo'ymaydi (`409 Conflict`).
+### 4. Fintech Idempotensiya Middleware (`X-Idempotency-Key`)
 
+Mijoz yoki tarmoq so'rovni takror yuborganida dublikat tranzaksiyalar yaratilishini to'xtatadi. So'rov tanasining `SHA-256` xeshini tekshiradi.
+
+#### Qayerda chaqiriladi va qanday ishlatiladi?
 ```csharp
-// Program.cs da ConfigureDefault() ichida Redis bo'lsa avtomatik faollashadi,
-// yoki qo'lda ulash uchun:
+// Program.cs da:
 builder.Services.AddCoreIdempotency();
-app.UseCoreIdempotency();
+app.UseCoreIdempotency(); // UseAuthentication dan keyin
 
-// Mijoz so'rov sarlavhasi (Header):
+// Mijoz yuboradigan so'rov sarlavhasi (Header):
 // POST /api/v1/orders
 // X-Idempotency-Key: e4b29b68-6c84-48f1-8f55-23fba93b79da
 ```
 
+#### ⚖️ Plus va Minuslari:
+- **✅ Plus:** Foydalanuvchi "To'lash" tugmasini 2 marta bossa ham mablag' faqat 1 marta yechiladi. Bir xil kalit bilan boshqa ma'lumot yuborilsa `409 Conflict` qaytaradi.
+- **⚠️ Minus:** Mijoz tomoni har bir yangi operatsiya uchun alohida unikal UUID yuborishi shart.
+
 ---
 
-### 4. 🚪 Sessiya va Tokenni Bekor Qilish (Session Revocation Middleware)
-Foydalanuvchi "Logout" qilganda yoki parolini o'zgartirganda uning JWT tokeni muddati tugashini kutmasdan darhol bekor qilish imkoniyati. Har bir so'rovda Redis'ga ortiqcha yuk tushmasligi uchun L1 In-Memory keshda 20 soniya keshlanadi.
+### 5. Sessiya va Tokenni Bekor Qilish (Session Revocation Middleware)
 
+Foydalanuvchi "Logout" qilganda yoki paroli o'zgarganda uning mavjud JWT tokenini darhol bekor qilish imkoniyati.
+
+#### Qayerda chaqiriladi va qanday ishlatiladi?
 ```csharp
 // Program.cs da:
 builder.Services.AddCoreSessionValidation();
-app.UseCoreSessionValidation(); // UseAuthentication() dan keyin turadi
+app.UseCoreSessionValidation(); // UseAuthentication dan keyin qo'yiladi
 ```
 
----
-
-### 5. 🗄️ PostgreSQL & EF Core 10 Optimallashtirishlari
-`CoreDbContext` va `AddCoreNpgsqlDataSource` orqali:
-- **`xmin` Optimistik Qulflash:** Entitiylarga qo'shimcha `RowVersion` ustunisiz, PostgreSQL tizim ustuni `xmin` orqali optimistik qulflash avtomatik yoqilgan.
-- **Statement Auto-Prepare:** `MaxAutoPrepare = 50`, `AutoPrepareMinUsages = 2`, `MinPoolSize = 10`, `KeepAlive = 30s` orqali SQL parsing va execution plan rejalashtirish xarajatlari serverda keshlanadi.
-- **Parametrlashtirilgan Dynamic LINQ (`QueryableExtensions`):** Closure o'rami orqali dinamik `FilterByExpressions` SQL parametrlari (`@p0`) shaklida yuboriladi va EF Core `CompiledQueryCache` ni 100% qayta ishlatadi.
-- **Read-Only so'rovlar:** `query.ToReadOnlyListAsync(ct)` orqali Change Tracker yuklamasini kamaytirish.
+#### ⚖️ Plus va Minuslari:
+- **✅ Plus:** Stateless JWT ning eng katta muammosini (muddati tugaguncha tokenni o'chirib bo'lmaslik) hal qiladi. Redis yuklamasini kamaytirish uchun L1 xotirada 20 soniya keshlanadi.
+- **⚠️ Minus:** Har bir HTTP so'rovda tekshiriladi (L1 kesh tufayli nanosoniyalarda ishlasa-da, bekor qilingan token maksimal 20 soniya ichida to'liq kuchini yo'qotadi).
 
 ---
 
-### 6. 🏢 Ko'p Ijarachilik (Multi-Tenancy)
-Agar servis SaaS yoki ko'p tashkilotli bo'lsa, entitiyga `ITenantEntity` interfeysini berasiz:
+### 6. PostgreSQL & EF Core 10 Asoslari (`CoreDbContext`)
 
+Mikroservis ma'lumotlar bazasi bilan ishlashini optimallashtiruvchi tayyor bazaviy DbContext.
+
+#### Qayerda chaqiriladi va qanday ishlatiladi?
 ```csharp
-public class Order : ModelBase<long>, ITenantEntity
+// 1. DbContext voris oladi:
+public class OrderDbContext : CoreDbContext
+{
+    public OrderDbContext(DbContextOptions<OrderDbContext> options, IServiceProvider sp, ITenantContext tc)
+        : base(options, sp, tc) { }
+
+    public DbSet<Order> Orders => Set<Order>();
+}
+
+// 2. Dinamik filtrlash (Parametrlashtirilgan Dynamic LINQ):
+var query = db.Orders.AsQueryable();
+var result = await query.FilterByExpressions(metaQueryModel).ToReadOnlyListAsync(ct);
+```
+
+#### Xususiyatlari:
+- **`xmin` Optimistik qulflash:** Entitiylarga qo'shimcha `RowVersion` ustunisiz, PostgreSQL tizim ustuni `xmin` orqali parallel o'zgartirishlarni nazorat qiladi.
+- **Parametrlashtirilgan Dynamic LINQ:** Dynamic so'rovlar SQL parametrlari (`@p0`) shaklida yuboriladi va EF Core `CompiledQueryCache` ni 100% qayta ishlatadi.
+- **`ToReadOnlyListAsync`:** ChangeTracker xarajatlarisiz ma'lumotlarni tezkor o'qish.
+
+#### ⚖️ Plus va Minuslari:
+- **✅ Plus:** O'ta yuqori SQL unumdorligi, SQL Injection xavfi nol, avtomatik `CreatedAt`/`UpdatedAt` va `IsDelete` boshqaruvi.
+- **⚠️ Minus:** PostgreSQL uchun maxsus sozlangan (`xmin`).
+
+---
+
+### 7. Ko'p Ijarachilik (Multi-Tenancy Izolyatsiyasi)
+
+SaaS yoki ko'p tashkilotli tizimlarda turli mijozlar ma'lumotlarini qat'iy ajratib turish.
+
+#### Qayerda chaqiriladi va qanday ishlatiladi?
+```csharp
+// 1. Entitiyga interfeys beriladi:
+public class Invoice : ModelBase<long>, ITenantEntity
 {
     public long? TenantId { get; set; }
-    public decimal TotalAmount { get; set; }
+    public decimal Amount { get; set; }
 }
+
+// 2. CoreDbContext avtomatik faqat joriy ijarachi ma'lumotlarini ko'rsatadi.
+// Vaqtincha boshqa ijarachiga o'tish yoki filtrni ochish:
+using (tenantContext.Change(otherTenantId)) { ... }
+using (tenantContext.DisableTenantFilter()) { ... }
 ```
-- `CoreDbContext` avtomatik ravishda faqat joriy ijarachi ma'lumotlarini filtrlaydi (`TenantId == currentTenantId`).
-- `(TenantId, IsDelete)` kompozit B-Tree indeksini avtomatik yaratadi (PostgreSQL Sequential Scan muammosi yo'qoladi).
-- Vaqtincha ijarachini almashtirish: `using (tenantContext.Change(otherTenantId)) { ... }`
-- Filtrni hisobotlar uchun vaqtincha ochish: `using (tenantContext.DisableTenantFilter()) { ... }`
+
+#### ⚖️ Plus va Minuslari:
+- **✅ Plus:** Ma'lumotlarning boshqa tashkilotga oqib ketish (Data Leakage) xavfi yo'qoladi. `(TenantId, IsDelete)` indeksi avtomatik yaratiladi (Sequential Scan muammosi yo'qoladi).
+- **⚠️ Minus:** Umumiy hisobotlar olishda filtrni qo'lda ochish kerak.
 
 ---
 
-### 7. 📬 MassTransit + PostgreSQL Transactional Outbox (RabbitMQ)
-Xabarlar baza tranzaksiyasi bilan bitta atomik PostgreSQL tranzaksiyasida saqlanadi. Tarmoq uzilsa ham xabar yo'qolmaydi va baza commit bo'lgandagina yuboriladi:
+### 8. MassTransit + Transactional Outbox (RabbitMQ)
 
+Xabarlarni ma'lumotlar bazasi tranzaksiyasi bilan bitta atomik tranzaksiyada saqlash (Dual-Write muammosini yo'qotadi).
+
+#### Qayerda chaqiriladi va qanday ishlatiladi?
 ```csharp
-// Program.cs da ro'yxatga olish:
+// 1. Program.cs da ulash:
 builder.Services.AddCoreMassTransit<MyDbContext>(builder.Configuration, bus =>
 {
     bus.AddConsumer<OrderCreatedConsumer>();
 });
 
-// Servisda xabar chiqarish (Publish):
-await publishEndpoint.Publish(new OrderCreatedIntegrationEvent { OrderId = order.Id }, ct);
-await dbContext.SaveChangesAsync(ct); // Baza va Outbox bitta tranzaksiyada saqlanadi!
+// 2. Servis ichida Publish qilish:
+await publishEndpoint.Publish(new OrderCreatedIntegrationEvent { OrderId = 123 }, ct);
+await dbContext.SaveChangesAsync(ct); // Outbox va Baza bitta atomik tranzaksiyada commit bo'ladi!
 ```
+
+#### ⚖️ Plus va Minuslari:
+- **✅ Plus:** Tarmoq uzilsa ham xabar yo'qolmaydi, baza commit bo'lsagina xabar ketadi. Eksponentsial qayta urinish (Retry) va Tenant avto-uzatish bor.
+- **⚠️ Minus:** Baza ichida Outbox/Inbox jadvallari yaratiladi va fonda MassTransit outbox service ishlaydi.
 
 ---
 
-### 8. ⚡ Servislararo Aloqa: Code-First gRPC (`protobuf-net.Grpc`)
-Mikroservislararo aloqani sekin HTTP/REST o'rniga tezyurar binary Code-First gRPC orqali amalga oshirish:
+### 9. Code-First gRPC (`protobuf-net.Grpc`)
 
+Mikroservislararo aloqani sekin REST o'rniga tezyurar binary gRPC orqali amalga oshirish. `.proto` fayllar yozish shart emas!
+
+#### Qayerda chaqiriladi va qanday ishlatiladi?
 ```csharp
-// 1. Shartnoma interfeysi (Contracts kutubxonasida):
+// 1. Umumiy shartnoma interfeysi:
 [ServiceContract]
 public interface IBillingGrpcService
 {
@@ -213,90 +383,38 @@ public interface IBillingGrpcService
     Task<BillingDto> GetBillingAsync(GetBillingRequest request, CallContext context = default);
 }
 
-// 2. Server servisda ro'yxatdan o'tkazish:
+// 2. Server servisda:
 builder.Services.AddCoreGrpcServer();
 app.MapGrpcService<BillingGrpcService>();
 
-// 3. Chaqiruvchi servisda mijozni ulash:
+// 3. Chaqiruvchi (Client) servisda:
 builder.Services.AddCoreGrpcClient<IBillingGrpcService>("http://billing-service:5001");
 ```
-> `CorrelationId`, `TenantId`, `UserId` va **10 soniyalik majburiy Deadline** hamda `RequestAborted` avtomatik uzatiladi.
+
+#### ⚖️ Plus va Minuslari:
+- **✅ Plus:** REST ga nisbatan 5-10 baravar tezroq binary oqim. Deadline (10 soniya), CorrelationId, TenantId va UserId avtomatik uzatiladi.
+- **⚠️ Minus:** Faqat .NET servislari o'rtasida ishlatish eng qulay.
 
 ---
 
-### 9. 🚦 Rate Limiting va Korporativ Xavfsizlik Sarlavhalari
-- **IP Rate Limiter:** `AddCoreRateLimiting()` har bir mijoz IP bo'yicha alohida darcha (100 req/s sliding window) ochadi.
-- **Security Headers:** Har bir javobga `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Strict-Transport-Security` sarlavhalari avtomatik beriladi.
-- **Compression:** Brotli (Fastest) + Gzip orqali faqat matn va JSON siqiladi (`AddCoreCompression()`).
+### 10. Xavfsizlik Sarlavhalari, Rate Limiting va Siqish
 
----
+Tashqi hujumlardan himoya va tarmoq trafigini siqish.
 
-### 10. 🔑 Taqsimlangan Ruxsatlar va Avto-Sinxronizatsiya (Decentralized Permissions)
-Har bir servis o'zining ruxsatlariga o'zi egalik qiladi. `Core` dagi umumiy enumga qaramlik yo'q!
-
-#### 1. Mikroservis o'zining lokal ruxsatlar enum'ini yaratadi:
+#### Qayerda chaqiriladi va qanday ishlatiladi?
 ```csharp
-[PermissionsModule("QuranCourse", serviceCode: 60, moduleName: "Quran Training")]
-public enum QuranPermissions
-{
-    [Description("Yangi o'quv markazi yaratish")]
-    CreateTrainingCenter = 60100001,
+// Program.cs da:
+builder.Services.AddCoreRateLimiting();
+builder.Services.AddCoreCompression();
 
-    [Description("O'quv markazlarini ko'rish")]
-    ViewTrainingCenters  = 60100002
-}
+app.UseCoreSecurityHeaders(); // X-Frame-Options: DENY, X-Content-Type-Options: nosniff
+app.UseResponseCompression(); // Brotli + Gzip
+app.UseRateLimiter();         // IP bo'yicha 100 req/s sliding window
 ```
 
-#### 2. Kontrollerda o'zining lokal enumi orqali tekshiradi:
-```csharp
-[PermissionAuthorize(QuranPermissions.CreateTrainingCenter)]
-[HttpPost]
-public async Task<IActionResult> CreateCenter() { ... }
-```
-*(Eski `[PermissionAuthorize(UserPermissions.LogOut)]` va raqamli `[PermissionAuthorize(60100001)]` kodlari ham 100% qo'llab-quvvatlanadi).*
-
-#### 3. Mikroservis Program.cs da avtomatik sinxronlashni yoqish:
-Servis ishga tushishi bilan barcha ruxsatlar RabbitMQ (yoki gRPC) orqali `AuthApi` ga avtomatik yuboriladi:
-```csharp
-builder.Services.AddCorePermissionAutoSync<QuranPermissions>();
-```
-
-#### 4. AuthApi tomonida qabul qilib bazaga saqlash:
-```csharp
-// 1. IPermissionStorageHandler ni implement qilish (EF Core orqali DB ga Upsert qilish):
-public class AuthPermissionStorageHandler : IPermissionStorageHandler
-{
-    public async Task<int> HandlePermissionsReceivedAsync(string serviceName, int? serviceCode, IReadOnlyList<PermissionDefinition> permissions, CancellationToken ct)
-    {
-        // Bazaga yangi ruxsatlarni qo'shish yoki yangilash
-        return permissions.Count;
-    }
-}
-
-// 2. Program.cs da ro'yxatdan o'tkazish:
-builder.Services.AddCorePermissionReceiver<AuthPermissionStorageHandler>();
-```
-
----
-
-## 🧩 Tezkor Boshlash (`Program.cs`)
-
-Barcha standart sozlamalar bitta chaqiruv bilan ishga tushadi:
-
-```csharp
-var builder = WebApplication.CreateBuilder(args);
-
-// Barcha standartlarni (DbContext, Logging, OpenTelemetry, Redis, DistributedLock, HybridCache) faollashtirish:
-builder.ConfigureDefault<MyDbContext>();
-
-var app = builder.Build();
-
-// Pipeline (SecurityHeaders, GlobalException, CorrelationId, Idempotency, SessionValidation, Swagger):
-await app.ConfigureDefault<MyDbContext>();
-
-app.MapControllers();
-app.Run();
-```
+#### ⚖️ Plus va Minuslari:
+- **✅ Plus:** DoS hujumlariga qarshi avtomatik cheklov, tarmoq trafigini siqish, Clickjacking va XSS dan himoya.
+- **⚠️ Minus:** Siqish jarayoni server protsessoriga (CPU) ozgina yuklama beradi.
 
 ---
 
@@ -305,4 +423,4 @@ app.Run();
 ```bash
 dotnet test Core.sln
 ```
-Barcha 12 ta unit testlar muvaffaqiyatli o'tadi.
+Barcha 16 ta unit testlar muvaffaqiyatli o'tadi.

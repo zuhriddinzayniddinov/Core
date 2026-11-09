@@ -4,10 +4,8 @@ using Microsoft.Extensions.Logging;
 namespace Core.Infrastructure.Permissions.Services;
 
 /// <summary>
-/// Mikroservis ishga tushganida (Application Startup) fonda avtomatik ravishda
-/// ruxsatlarni AuthApi ga yuboruvchi orqa fon xizmati (<see cref="IHostedService"/>).
-/// Dasturchi har safar qo'lda kod yozishi shart emas, servis start bo'lishi bilan
-/// o'z ruxsatlarini ro'yxatdan o'tkazadi.
+/// Mikroservis yoki AuthApi ishga tushganida (Application Startup) fonda avtomatik ravishda
+/// ruxsatlarni AuthApi ga yuboruvchi yoki to'g'ridan-to'g'ri bazaga saqlovchi orqa fon xizmati (<see cref="IHostedService"/>).
 /// </summary>
 public class PermissionAutoSyncHostedService : BackgroundService
 {
@@ -19,7 +17,7 @@ public class PermissionAutoSyncHostedService : BackgroundService
     /// <see cref="PermissionAutoSyncHostedService"/> konstruktori.
     /// </summary>
     /// <param name="sender">Ruxsatlarni yuboruvchi xizmat.</param>
-    /// <param name="mode">Sinxronlashtirish usuli (RabbitMQ yoki gRPC).</param>
+    /// <param name="mode">Sinxronlashtirish usuli (RabbitMQ, gRPC yoki Direct).</param>
     /// <param name="logger">Tizim logeri.</param>
     public PermissionAutoSyncHostedService(
         IPermissionSyncSender sender,
@@ -36,7 +34,17 @@ public class PermissionAutoSyncHostedService : BackgroundService
     {
         try
         {
-            // RabbitMQ yoki tarmoq to'liq ulanib olishi uchun dastlab 2 soniya kutamiz
+            // Agar rejim Direct bo'lsa (AuthApi o'zining ichki enumlarini bazaga saqlashi uchun),
+            // tarmoq ulanishini kutmasdan darhol saqlashni boshlaymiz
+            if (_mode == PermissionSyncMode.Direct)
+            {
+                _logger.LogInformation("Lokal ruxsatlarni to'g'ridan-to'g'ri bazaga saqlash boshlandi (Direct Mode)...");
+                await _sender.SyncDirectAsync(stoppingToken);
+                _logger.LogInformation("Lokal ruxsatlarni bazaga saqlash muvaffaqiyatli yakunlandi.");
+                return;
+            }
+
+            // Tashqi mikroservislar uchun RabbitMQ / tarmoq to'liq ulanib olishi uchun dastlab 2 soniya kutamiz
             await Task.Delay(2000, stoppingToken);
 
             if (_mode is PermissionSyncMode.RabbitMq or PermissionSyncMode.Both)
